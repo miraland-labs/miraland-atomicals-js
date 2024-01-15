@@ -13,6 +13,8 @@ download_txs/
 transfer_txs/
 wallets/
 wallets/*
+*wallet/
+*wallets/
 wallet.json
 wallet.json.*
 keypairs.json

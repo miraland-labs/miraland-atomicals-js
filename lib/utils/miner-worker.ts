@@ -134,7 +134,7 @@ if (parentPort) {
             }
             if (sequence % 10000 == 0) {
                 console.log(
-                    "Started mining for sequence: " +
+                    "Started commit stage mining for sequence: " +
                         sequence +
                         " - " +
                         Math.min(sequence + 10000, MAX_SEQUENCE)
