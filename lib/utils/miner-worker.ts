@@ -181,7 +181,9 @@ if (parentPort) {
             ) {
                 // Valid proof of work found, log success message
                 console.log(
-                    chalk.green(prelimTx.getId(), ` sequence: (${sequence})`)
+                    // chalk.green(prelimTx.getId(), ` sequence: (${sequence})`)
+                    chalk.green(prelimTx.getId(), ` sequence: (${sequence})`,
+                        ` time: (${copiedData["args"]["time"]})`, ` nonce: (${copiedData["args"]["nonce"]})`)
                 );
                 console.log(
                     "\nBitwork matches commit txid! ",

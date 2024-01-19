@@ -1,5 +1,5 @@
 {
-  "name": "miraland-atomicals-js",
+  "name": "atomicals-js",
   "version": "0.1.69",
   "description": "Atomicals Javascript Library and CLI - atomicals.xyz",
   "main": "dist/index.js",

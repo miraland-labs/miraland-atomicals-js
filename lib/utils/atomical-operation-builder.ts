@@ -41,12 +41,12 @@ import {
 import * as ecc from "tiny-secp256k1";
 import { ECPairFactory, ECPairAPI, TinySecp256k1Interface } from "ecpair";
 
-const tinysecp: TinySecp256k1Interface = require("tiny-secp256k1");
+const tinysecp: TinySecp256k1Interface = ecc;
 const bitcoin = require("bitcoinjs-lib");
 import * as chalk from "chalk";
 
 bitcoin.initEccLib(ecc);
-import { initEccLib, networks, Psbt, Transaction } from "bitcoinjs-lib";
+import { initEccLib, Psbt } from "bitcoinjs-lib";
 
 initEccLib(tinysecp as any);
 import {
@@ -636,7 +636,8 @@ export class AtomicalOperationBuilder {
 
         // Placeholder for only estimating tx deposit fee size.
         if (performBitworkForCommitTx) {
-            copiedData["args"]["nonce"] = 9999999;
+            // Use zero nonce in order for recoverable real addresses.
+            copiedData["args"]["nonce"] = 0;
             copiedData["args"]["time"] = unixtime;
         }
 
@@ -660,13 +661,14 @@ export class AtomicalOperationBuilder {
             );
         const fees: FeeCalculations =
             this.calculateFeesRequiredForAccumulatedCommitAndReveal(
-                mockBaseCommitForFeeCalculation.hashLockP2TR.redeem.output
-                    .length
+                mockBaseCommitForFeeCalculation.hashLockP2TR.redeem.output.length,
+                performBitworkForRevealTx
             );
 
         ////////////////////////////////////////////////////////////////////////
         // Begin Commit Transaction
         ////////////////////////////////////////////////////////////////////////
+
         if (performBitworkForCommitTx) {
             // Attempt to get funding UTXO information
             const fundingUtxo = await getFundingUtxo(
@@ -688,9 +690,8 @@ export class AtomicalOperationBuilder {
                 ? parseInt(process.env.CONCURRENCY, 10)
                 : -1;
             // Use envConcurrency if it is a positive number; otherwise, use defaultConcurrency
-            const concurrency = envConcurrency > 0
-                ? envConcurrency
-                : defaultConcurrency;
+            const concurrency =
+                envConcurrency > 0 ? envConcurrency : defaultConcurrency;
             // Logging the set concurrency level to the console
             console.log(`Concurrency set to: ${concurrency}`);
             const workerOptions = this.options;
@@ -724,7 +725,9 @@ export class AtomicalOperationBuilder {
 
                 // Handle messages from workers
                 worker.on("message", (message: WorkerOut) => {
-                    console.log("Solution found for commit step, try composing the transaction...");
+                    console.log(
+                        "Solution found for commit step, try composing the transaction..."
+                    );
 
                     if (!isWorkDone) {
                         isWorkDone = true;
@@ -785,7 +788,7 @@ export class AtomicalOperationBuilder {
                             console.log("Error sending", interTx.getId(), rawtx);
                             throw new Error(
                                 "Unable to broadcast commit transaction after attempts: " +
-                                interTx.getId()
+                                    interTx.getId()
                             );
                         } else {
                             console.log("Success sent tx: ", interTx.getId());
@@ -844,23 +847,26 @@ export class AtomicalOperationBuilder {
                 workers.push(worker);
             }
 
-            console.log("\nStay calm and grab a drink! Miner workers have started mining...\n");
+            console.log(
+                "Stay calm and grab a drink! Miner workers have started mining..."
+            );
 
             // Await results from workers
             const messageFromWorker = await workerPromise;
-            console.log("\nWorkers have completed their tasks for the commit transaction.\n");
+            console.log(
+                "Workers have completed their tasks for the commit transaction."
+            );
         } else {
-            const baseCommit: { scriptP2TR, hashLockP2TR } = prepareCommitRevealConfig(this.options.opType, fundingKeypair, new AtomicalsPayload(copiedData))
-            scriptP2TR = baseCommit.scriptP2TR;
-            hashLockP2TR = baseCommit.hashLockP2TR;
+            scriptP2TR = mockBaseCommitForFeeCalculation.scriptP2TR;
+            hashLockP2TR = mockBaseCommitForFeeCalculation.hashLockP2TR;
         }
 
         ////////////////////////////////////////////////////////////////////////
         // Begin Reveal Transaction
         ////////////////////////////////////////////////////////////////////////
 
-        // The scriptP2TR and hashLockP2TR will contain the utxo needed for the commit and now can be revealed
         // commitUtxo is original utxoOfCommitAddress
+        // The scriptP2TR and hashLockP2TR will contain the utxo needed for the commit and now can be revealed
         const commitUtxo = await getFundingUtxo(
             this.options.electrumApi,
             scriptP2TR.address,
@@ -888,9 +894,8 @@ export class AtomicalOperationBuilder {
                 ? parseInt(process.env.CONCURRENCY, 10)
                 : -1;
             // Use envConcurrency if it is a positive number; otherwise, use defaultConcurrency
-            const concurrency = envConcurrency > 0
-                ? envConcurrency
-                : defaultConcurrency;
+            const concurrency =
+                envConcurrency > 0 ? envConcurrency : defaultConcurrency;
             // Logging the set concurrency level to the console
             console.log(`Concurrency set to: ${concurrency}`);
             const revealerOptions = this.options;
@@ -917,8 +922,9 @@ export class AtomicalOperationBuilder {
             };
 
             // Calculate the range of sequences to be assigned to each revealer
-            // const seqRangePerRevealer = Math.floor(MAX_SEQUENCE / concurrency);
-            const seqRangePerRevealer = Math.floor(SEQ_RANGE_BUCKET / concurrency);
+            const seqRangePerRevealer = Math.floor(
+                SEQ_RANGE_BUCKET / concurrency
+            );
 
             // Initialize and start revealer threads
             for (let i = 0; i < concurrency; i++) {
@@ -927,7 +933,9 @@ export class AtomicalOperationBuilder {
 
                 // Handle messages from revealers
                 revealer.on("message", (message: RevealerOut) => {
-                    console.log("Solution found for reveal step, try composing the transaction...");
+                    console.log(
+                        "Solution found for reveal step, try composing the transaction..."
+                    );
 
                     if (!isWorkDone) {
                         isWorkDone = true;
@@ -940,25 +948,15 @@ export class AtomicalOperationBuilder {
                             solutionSequence,
                         } = message;
 
-                        const atomPayload = new AtomicalsPayload(
-                            finalCopyData
-                        );
-
-                        // const updatedBaseReveal: {
-                        //     scriptP2TR;
-                        //     hashLockP2TR;
-                        //     hashscript;
-                        // } = prepareCommitRevealConfig(
-                        //     revealerOptions.opType,
-                        //     fundingKeypair,
-                        //     atomPayload
-                        // );
+                        const atomPayload = new AtomicalsPayload(finalCopyData);
 
                         const tapLeafScript = {
                             leafVersion: hashLockP2TR.redeem.redeemVersion,
                             script: hashLockP2TR.redeem.output,
                             controlBlock:
-                                hashLockP2TR.witness![hashLockP2TR.witness!.length - 1],
+                                hashLockP2TR.witness![
+                                    hashLockP2TR.witness!.length - 1
+                                ],
                         };
 
                         let totalInputsforReveal = 0; // We calculate the total inputs for the reveal to determine to make change output or not
@@ -967,8 +965,9 @@ export class AtomicalOperationBuilder {
                         psbtStart.setVersion(1);
 
                         psbtStart.addInput({
-                            // sequence: message.solutionSequence,
-                            sequence: this.options.rbf ? RBF_INPUT_SEQUENCE : undefined,
+                            sequence: this.options.rbf
+                                ? RBF_INPUT_SEQUENCE
+                                : undefined,
                             hash: commitUtxo.txid,
                             index: commitUtxo.vout, // .index or .vout, both are same value
                             witnessUtxo: {
@@ -982,14 +981,18 @@ export class AtomicalOperationBuilder {
                         // Add any additional inputs that were assigned
                         for (const additionalInput of this.inputUtxos) {
                             psbtStart.addInput({
-                                sequence: this.options.rbf ? RBF_INPUT_SEQUENCE : undefined,
+                                sequence: this.options.rbf
+                                    ? RBF_INPUT_SEQUENCE
+                                    : undefined,
                                 hash: additionalInput.utxo.hash,
                                 index: additionalInput.utxo.index,
                                 witnessUtxo: additionalInput.utxo.witnessUtxo,
                                 tapInternalKey:
-                                    additionalInput.keypairInfo.childNodeXOnlyPubkey,
+                                    additionalInput.keypairInfo
+                                        .childNodeXOnlyPubkey,
                             });
-                            totalInputsforReveal += additionalInput.utxo.witnessUtxo.value;
+                            totalInputsforReveal +=
+                                additionalInput.utxo.witnessUtxo.value;
                         }
 
                         // Note, we do not assign any outputs by default.
@@ -1006,26 +1009,37 @@ export class AtomicalOperationBuilder {
 
                         if (parentAtomicalInfo) {
                             psbtStart.addInput({
-                                sequence: this.options.rbf ? RBF_INPUT_SEQUENCE : undefined,
+                                sequence: this.options.rbf
+                                    ? RBF_INPUT_SEQUENCE
+                                    : undefined,
                                 hash: parentAtomicalInfo.parentUtxoPartial.hash,
-                                index: parentAtomicalInfo.parentUtxoPartial.index,
+                                index: parentAtomicalInfo.parentUtxoPartial
+                                    .index,
                                 witnessUtxo:
-                                    parentAtomicalInfo.parentUtxoPartial.witnessUtxo,
+                                    parentAtomicalInfo.parentUtxoPartial
+                                        .witnessUtxo,
                                 tapInternalKey:
-                                    parentAtomicalInfo.parentKeyInfo.childNodeXOnlyPubkey,
+                                    parentAtomicalInfo.parentKeyInfo
+                                        .childNodeXOnlyPubkey,
                             });
                             totalInputsforReveal +=
-                                parentAtomicalInfo.parentUtxoPartial.witnessUtxo.value;
+                                parentAtomicalInfo.parentUtxoPartial.witnessUtxo
+                                    .value;
                             psbtStart.addOutput({
-                                address: parentAtomicalInfo.parentKeyInfo.address,
-                                value: parentAtomicalInfo.parentUtxoPartial.witnessUtxo
-                                    .value,
+                                address:
+                                    parentAtomicalInfo.parentKeyInfo.address,
+                                value: parentAtomicalInfo.parentUtxoPartial
+                                    .witnessUtxo.value,
                             });
                             totalOutputsForReveal +=
-                                parentAtomicalInfo.parentUtxoPartial.witnessUtxo.value;
+                                parentAtomicalInfo.parentUtxoPartial.witnessUtxo
+                                    .value;
                         }
 
-                        const data = Buffer.from(solutionTime + ":" + solutionSequence, "utf8");
+                        const data = Buffer.from(
+                            solutionTime + ":" + solutionSequence,
+                            "utf8"
+                        );
                         const embed = bitcoin.payments.embed({ data: [data] });
 
                         if (performBitworkForRevealTx) {
@@ -1043,7 +1057,6 @@ export class AtomicalOperationBuilder {
                         );
 
                         psbtStart.signInput(0, fundingKeypair.childNode);
-                        // psbtStart.finalizeAllInputs();
                         // Sign all the additional inputs, if there were any
                         let signInputIndex = 1;
                         for (const additionalInput of this.inputUtxos) {
@@ -1054,20 +1067,30 @@ export class AtomicalOperationBuilder {
                             signInputIndex++;
                         }
                         if (parentAtomicalInfo) {
-                            console.log("parentAtomicalInfo", parentAtomicalInfo);
+                            console.log(
+                                "parentAtomicalInfo",
+                                parentAtomicalInfo
+                            );
                             psbtStart.signInput(
                                 signInputIndex,
-                                parentAtomicalInfo.parentKeyInfo.tweakedChildNode
+                                parentAtomicalInfo.parentKeyInfo
+                                    .tweakedChildNode
                             );
                         }
                         // We have to construct our witness script in a custom finalizer
-                        const customFinalizer = (_inputIndex: number, input: any) => {
-                            const scriptSolution = [input.tapScriptSig[0].signature];
+                        const customFinalizer = (
+                            _inputIndex: number,
+                            input: any
+                        ) => {
+                            const scriptSolution = [
+                                input.tapScriptSig[0].signature,
+                            ];
                             const witness = scriptSolution
                                 .concat(tapLeafScript.script)
                                 .concat(tapLeafScript.controlBlock);
                             return {
-                                finalScriptWitness: witnessStackToScriptWitness(witness),
+                                finalScriptWitness:
+                                    witnessStackToScriptWitness(witness),
                             };
                         };
                         psbtStart.finalizeInput(0, customFinalizer);
@@ -1096,7 +1119,11 @@ export class AtomicalOperationBuilder {
                             process.stdout.clearLine(0);
                             process.stdout.cursorTo(0);
                             process.stdout.write(
-                                chalk.green(checkTxid, " solution time: " + solutionTime, " solution sequence: " + solutionSequence)
+                                chalk.green(
+                                    checkTxid,
+                                    " solution time: " + solutionTime,
+                                    " solution sequence: " + solutionSequence
+                                )
                             );
                             console.log(
                                 "\nBitwork matches reveal txid! ",
@@ -1112,16 +1139,26 @@ export class AtomicalOperationBuilder {
                                 psbtStart,
                                 revealTx
                             );
-                            console.log("\nBroadcasting tx...", revealTx.getId());
+                            console.log(
+                                "\nBroadcasting tx...",
+                                revealTx.getId()
+                            );
                             const interTx = psbtStart.extractTransaction();
                             const rawtx = interTx.toHex();
-                            if (!(this.broadcastWithRetries(rawtx))) {
-                                console.log("Error sending", revealTx.getId(), rawtx);
+                            if (!this.broadcastWithRetries(rawtx)) {
+                                console.log(
+                                    "Error sending",
+                                    revealTx.getId(),
+                                    rawtx
+                                );
                                 throw new Error(
                                     "Unable to broadcast reveal transaction after attempts"
                                 );
                             } else {
-                                console.log("Success sent tx: ", revealTx.getId());
+                                console.log(
+                                    "Success sent tx: ",
+                                    revealTx.getId()
+                                );
                             }
                             revealTxid = interTx.getId();
                             performBitworkForRevealTx = false; // Done
@@ -1140,7 +1177,9 @@ export class AtomicalOperationBuilder {
                 });
                 revealer.on("exit", (code) => {
                     if (code !== 0) {
-                        console.error(`Revealer stopped with exit code ${code}`);
+                        console.error(
+                            `Revealer stopped with exit code ${code}`
+                        );
                     }
                 });
 
@@ -1150,7 +1189,6 @@ export class AtomicalOperationBuilder {
 
                 // Ensure the last revealer covers the remaining range of the initial bucket
                 if (i === concurrency - 1) {
-                    // seqEnd = MAX_SEQUENCE - 1;
                     seqEnd = SEQ_RANGE_BUCKET - 1;
                 }
 
@@ -1175,12 +1213,17 @@ export class AtomicalOperationBuilder {
                 revealers.push(revealer);
             }
 
-            console.log("\nDon't despair, it still takes some time! Miner revealers have started mining...\n");
+            console.log(
+                "\nDon't despair, it still takes some time! Miner revealers have started mining...\n"
+            );
 
             // Await results from revealers
             const messageFromRevealer = await revealerPromise;
-            console.log("\nRevealers have completed their tasks for the reveal transaction.\n"); 
-        } else {// performBitworkForRevealTx == false
+            console.log(
+                "\nRevealers have completed their tasks for the reveal transaction.\n"
+            );
+        } else {
+            // performBitworkForRevealTx == false
             const tapLeafScript = {
                 leafVersion: hashLockP2TR.redeem.redeemVersion,
                 script: hashLockP2TR.redeem.output,
@@ -1305,6 +1348,7 @@ export class AtomicalOperationBuilder {
             // Broadcast either because there was no bitwork requested, and we are done with bitwork.
             // broadcast because we found the bitwork and it is ready to be broadcasted
             if (shouldBroadcast) {
+                console.log("\nPrint raw tx in case of broadcast failure", revealTx.toHex());
                 AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
                     psbt,
                     revealTx
@@ -1322,8 +1366,8 @@ export class AtomicalOperationBuilder {
                 }
                 revealTxid = interTx.getId();
             }
-        } // End if performBitworkForRevealTx
-        
+        }
+
         const ret = {
             success: true,
             data: {
@@ -1343,7 +1387,7 @@ export class AtomicalOperationBuilder {
             ret["data"]["urn"] = "atom:btc:dat:" + revealTxid + "i0";
         }
         return ret;
-    } // End of start()
+    }
 
     async broadcastWithRetries(rawtx: string): Promise<any> {
         let attempts = 0;
@@ -1402,15 +1446,27 @@ export class AtomicalOperationBuilder {
     }
 
     calculateAmountRequiredForReveal(
-        hashLockP2TROutputLen: number = 0
+        hashLockP2TROutputLen: number = 0,
+        performBitworkForRevealTx: boolean = false
     ): number {
         // <Previous txid> <Output index> <Length of scriptSig> <Sequence number>
         // 32 + 4 + 1 + 4 = 41
         // <Witness stack item length> <Signature> ... <Control block>
         // (1 + 65 + 34) / 4 = 25
         // Total: 41 + 25 = 66
+        //-----------------------------------------
+        // OP_RETURN size
+        // 8-bytes value(roughly estimate), a one-byte script’s size
+        // actual value size depends precisely on final nonce
+        const OP_RETURN_BYTES: number = 21 + 8 + 1;
+        //-----------------------------------------
         const REVEAL_INPUT_BYTES_BASE = 66;
+        // OP_RETURN size
         let hashLockCompactSizeBytes = 9;
+        let op_Return_SizeBytes = 0;
+        if(performBitworkForRevealTx){
+            op_Return_SizeBytes = OP_RETURN_BYTES;
+        }
         if (hashLockP2TROutputLen <= 252) {
             hashLockCompactSizeBytes = 1;
         } else if (hashLockP2TROutputLen <= 0xffff) {
@@ -1418,7 +1474,6 @@ export class AtomicalOperationBuilder {
         } else if (hashLockP2TROutputLen <= 0xffffffff) {
             hashLockCompactSizeBytes = 5;
         }
-
         return Math.ceil(
             (this.options.satsbyte as any) *
                 (BASE_BYTES +
@@ -1427,15 +1482,15 @@ export class AtomicalOperationBuilder {
                     (hashLockCompactSizeBytes + hashLockP2TROutputLen) / 4 +
                     // Additional inputs
                     this.inputUtxos.length * INPUT_BYTES_BASE +
-                    // MI: + OP_RETURN about 30 bytes
-                    30 +
                     // Outputs
-                    this.additionalOutputs.length * OUTPUT_BYTES_BASE)
-        );
+                    this.additionalOutputs.length * OUTPUT_BYTES_BASE + 
+                    // Bitwork Output OP_RETURN Size Bytes
+                    op_Return_SizeBytes)
+                )
     }
 
     calculateFeesRequiredForCommit(): number {
-        let fees =  Math.ceil(
+        let fees = Math.ceil(
             (this.options.satsbyte as any) *
                 (BASE_BYTES + 1 * INPUT_BYTES_BASE + 1 * OUTPUT_BYTES_BASE)
         );
@@ -1456,10 +1511,12 @@ export class AtomicalOperationBuilder {
      * @returns
      */
     calculateFeesRequiredForAccumulatedCommitAndReveal(
-        hashLockP2TROutputLen: number = 0
+        hashLockP2TROutputLen: number = 0,
+        performBitworkForRevealTx: boolean = false
     ): FeeCalculations {
         const revealFee = this.calculateAmountRequiredForReveal(
-            hashLockP2TROutputLen
+            hashLockP2TROutputLen,
+            performBitworkForRevealTx
         );
         const commitFee = this.calculateFeesRequiredForCommit();
         const commitAndRevealFee = commitFee + revealFee;

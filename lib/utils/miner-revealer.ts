@@ -5,7 +5,7 @@ import { BitworkInfo, hasValidBitwork } from "./atomical-format-helpers";
 import * as ecc from "tiny-secp256k1";
 import { ECPairFactory, ECPairAPI, TinySecp256k1Interface } from "ecpair";
 
-const tinysecp: TinySecp256k1Interface = require("tiny-secp256k1");
+const tinysecp: TinySecp256k1Interface = ecc;
 const bitcoin = require("bitcoinjs-lib");
 import * as chalk from "chalk";
 
@@ -78,17 +78,13 @@ if (parentPort) {
             hashLockP2TR,
         } = message;
 
-        // let sequence = seqStart;
         let newSeqStart = seqStart;
         let newSeqEnd = seqEnd;
-        let sequence = newSeqStart; 
+        let sequence = newSeqStart;
         let revealerPerformBitworkForRevealTx = performBitworkForRevealTx;
 
         const fundingKeypairRaw = ECPair.fromWIF(fundingWIF);
         const fundingKeypair = getKeypairInfo(fundingKeypairRaw);
-
-        // copiedData["args"]["nonce"] = Math.floor(Math.random() * 10000000);
-        // copiedData["args"]["time"] = Math.floor(Date.now() / 1000);
 
         let atomPayload = new AtomicalsPayload(copiedData);
 
@@ -103,7 +99,9 @@ if (parentPort) {
             leafVersion: updatedBaseReveal.hashLockP2TR.redeem.redeemVersion,
             script: updatedBaseReveal.hashLockP2TR.redeem.output,
             controlBlock:
-                updatedBaseReveal.hashLockP2TR.witness![updatedBaseReveal.hashLockP2TR.witness!.length - 1],
+                updatedBaseReveal.hashLockP2TR.witness![
+                    updatedBaseReveal.hashLockP2TR.witness!.length - 1
+                ],
         };
 
         let unixtime = Math.floor(Date.now() / 1000);
@@ -116,15 +114,13 @@ if (parentPort) {
             await sleep(0);
 
             // This revealer has tried all assigned sequence range but it did not find solution.
-            // if (sequence > seqEnd) {
-            //     solutionSequence = -1;
-            // }
             if (sequence > newSeqEnd) {
                 if (newSeqEnd <= MAX_SEQUENCE - SEQ_RANGE_BUCKET) {
                     newSeqStart += SEQ_RANGE_BUCKET;
                     newSeqEnd += SEQ_RANGE_BUCKET;
                     sequence = newSeqStart;
-                } else { // revealer stop mining w/o solution found
+                } else {
+                    // revealer stop mining w/o solution found
                     solutionSequence = -1;
                 }
             }
@@ -133,7 +129,6 @@ if (parentPort) {
                     "Started reveal stage mining for sequence: " +
                         sequence +
                         " - " +
-                        // Math.min(sequence + 10000, MAX_SEQUENCE)
                         Math.min(sequence + 10000, newSeqEnd)
                 );
             }
@@ -145,7 +140,6 @@ if (parentPort) {
             psbtStart.setVersion(1);
 
             psbtStart.addInput({
-                // sequence: message.solutionSequence,
                 sequence: revealerOptions.rbf ? RBF_INPUT_SEQUENCE : undefined,
                 hash: commitUtxo.txid,
                 index: commitUtxo.vout, // .index or .vout, both are same value
@@ -160,7 +154,9 @@ if (parentPort) {
             // Add any additional inputs that were assigned
             for (const additionalInput of revealerInputUtxos) {
                 psbtStart.addInput({
-                    sequence: revealerOptions.rbf ? RBF_INPUT_SEQUENCE : undefined,
+                    sequence: revealerOptions.rbf
+                        ? RBF_INPUT_SEQUENCE
+                        : undefined,
                     hash: additionalInput.utxo.hash,
                     index: additionalInput.utxo.index,
                     witnessUtxo: additionalInput.utxo.witnessUtxo,
@@ -184,7 +180,9 @@ if (parentPort) {
 
             if (parentAtomicalInfo) {
                 psbtStart.addInput({
-                    sequence: revealerOptions.rbf ? RBF_INPUT_SEQUENCE : undefined,
+                    sequence: revealerOptions.rbf
+                        ? RBF_INPUT_SEQUENCE
+                        : undefined,
                     hash: parentAtomicalInfo.parentUtxoPartial.hash,
                     index: parentAtomicalInfo.parentUtxoPartial.index,
                     witnessUtxo:
@@ -225,7 +223,6 @@ if (parentPort) {
             );
 
             psbtStart.signInput(0, fundingKeypair.childNode);
-            // psbtStart.finalizeAllInputs();
             // Sign all the additional inputs, if there were any
             let signInputIndex = 1;
             for (const additionalInput of revealerInputUtxos) {
@@ -305,12 +302,14 @@ if (parentPort) {
             console.log(
                 "got one solutionPrelimTx:" + JSON.stringify(solutionPrelimTx)
             );
-            console.log("got one solutionSequence:" + JSON.stringify(solutionSequence));
+            console.log(
+                "got one solutionSequence:" + JSON.stringify(solutionSequence)
+            );
 
             parentPort!.postMessage({
                 finalCopyData,
                 solutionTime,
-                solutionSequence
+                solutionSequence,
             });
         }
     });
