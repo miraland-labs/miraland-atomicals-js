@@ -651,6 +651,7 @@ export class AtomicalOperationBuilder {
 
         if (payloadSize <= 1000) {
             console.log("Payload Encoded: ", copiedData);
+            console.log("Payload CBOR: ", mockAtomPayload.cbor().toString('hex')); // .match(/../g).join(' ')); // MI, temp debug purpose.
         }
 
         const mockBaseCommitForFeeCalculation: { scriptP2TR; hashLockP2TR } =
