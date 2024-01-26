@@ -64,6 +64,7 @@ import { witnessStackToScriptWitness } from "../commands/witness_stack_to_script
 import { IInputUtxoPartial } from "../types/UTXO.interface";
 import { IWalletRecord } from "./validate-wallet-storage";
 import { parentPort, Worker } from "worker_threads";
+import * as readline from 'readline';
 
 const ECPair: ECPairAPI = ECPairFactory(tinysecp);
 export const DEFAULT_SATS_BYTE = 10;
@@ -74,7 +75,7 @@ export const DUST_AMOUNT = 546;
 export const BASE_BYTES = 10.5;
 export const INPUT_BYTES_BASE = 57.5;
 export const OUTPUT_BYTES_BASE = 43;
-export const EXCESSIVE_FEE_LIMIT: number = 500000; // Limit to 1/200 of a BTC for now
+export const EXCESSIVE_FEE_LIMIT: number = 1000000; // Limit to 1/100 of a BTC for now
 export const MAX_SEQUENCE = 0xffffffff;
 export const SEQ_RANGE_BUCKET = 100000000;
 
@@ -725,7 +726,7 @@ export class AtomicalOperationBuilder {
                 const worker = new Worker("./dist/utils/miner-worker.js");
 
                 // Handle messages from workers
-                worker.on("message", (message: WorkerOut) => {
+                worker.on("message", async (message: WorkerOut) => {
                     console.log(
                         "Solution found for commit step, try composing the transaction..."
                     );
@@ -781,7 +782,7 @@ export class AtomicalOperationBuilder {
                         const interTx = psbtStart.extractTransaction();
 
                         const rawtx = interTx.toHex();
-                        AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
+                        await AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
                             psbtStart,
                             interTx
                         );
@@ -933,7 +934,7 @@ export class AtomicalOperationBuilder {
                 const revealer = new Worker("./dist/utils/miner-revealer.js");
 
                 // Handle messages from revealers
-                revealer.on("message", (message: RevealerOut) => {
+                revealer.on("message", async (message: RevealerOut) => {
                     console.log(
                         "Solution found for reveal step, try composing the transaction..."
                     );
@@ -1136,7 +1137,7 @@ export class AtomicalOperationBuilder {
                         // Broadcast either because there was no bitwork requested, and we are done. OR...
                         // broadcast because we found the bitwork and it is ready to be broadcasted
                         if (shouldBroadcast) {
-                            AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
+                            await AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
                                 psbtStart,
                                 revealTx
                             );
@@ -1350,7 +1351,7 @@ export class AtomicalOperationBuilder {
             // broadcast because we found the bitwork and it is ready to be broadcasted
             if (shouldBroadcast) {
                 console.log("\nPrint raw tx in case of broadcast failure", revealTx.toHex());
-                AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
+                await AtomicalOperationBuilder.finalSafetyCheckForExcessiveFee(
                     psbt,
                     revealTx
                 );
@@ -1484,7 +1485,7 @@ export class AtomicalOperationBuilder {
                     // Additional inputs
                     this.inputUtxos.length * INPUT_BYTES_BASE +
                     // Outputs
-                    this.additionalOutputs.length * OUTPUT_BYTES_BASE + 
+                    this.additionalOutputs.length * OUTPUT_BYTES_BASE +
                     // Bitwork Output OP_RETURN Size Bytes
                     op_Return_SizeBytes)
                 )
@@ -1610,7 +1611,7 @@ export class AtomicalOperationBuilder {
      * @param psbt Partially signed bitcoin tx coresponding to the tx to calculate the total inputs values provided
      * @param tx The tx to broadcast, uses the outputs to calculate total outputs
      */
-    static finalSafetyCheckForExcessiveFee(psbt: any, tx) {
+    static async finalSafetyCheckForExcessiveFee(psbt: any, tx) {
         let sumInputs = 0;
         psbt.data.inputs.map((inp) => {
             sumInputs += inp.witnessUtxo.value;
@@ -1619,10 +1620,27 @@ export class AtomicalOperationBuilder {
         tx.outs.map((out) => {
             sumOutputs += out.value;
         });
-        if (sumInputs - sumOutputs > EXCESSIVE_FEE_LIMIT) {
-            throw new Error(
-                `Excessive fee detected. Hardcoded to ${EXCESSIVE_FEE_LIMIT} satoshis. Aborting due to protect funds. Contact developer`
-            );
+        const fee = sumInputs - sumOutputs;
+        if (fee > EXCESSIVE_FEE_LIMIT) {
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout
+            });
+            try {
+                let reply: string = '';
+                const prompt = (query) => new Promise((resolve) => rl.question(query, resolve));
+                console.log(`Excessive fee ${fee} satoshis detected. Hardcoded to ${EXCESSIVE_FEE_LIMIT} satoshis. Aborting due to protect funds.`)
+                reply = (await prompt("To ignore and continue type 'y' or 'n' to cancel: ") as any);
+                if (reply === 'y' || reply === 'yes') {
+                    return;
+                }
+                if (reply === 'n' || reply === 'no') {
+                    throw 'Aborted for excessive fee. User cancelled';
+                }
+                throw 'Aborted for excessive fee.';
+            } finally {
+                rl.close()
+            }
         }
     }
 
